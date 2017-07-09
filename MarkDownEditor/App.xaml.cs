@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -22,11 +23,17 @@ namespace MarkDownEditor
         };
 
         public App()
-        {
-            var settings = new CefSettings();
-            settings.EnableInternalPdfViewerOffScreen();
-            settings.CefCommandLineArgs.Add("disable-gpu", "1");
-            Cef.Initialize(settings, shutdownOnProcessExit: false, performDependencyCheck: false);
+        {            
+            Environment.CurrentDirectory = AppDomain.CurrentDomain.SetupInformation.ApplicationBase;
+
+            var settings = new CefSettings()
+            {
+               CachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CefSharp\\Cache")
+            };
+
+            settings.DisableGpuAcceleration();
+            Cef.EnableHighDPISupport();
+            Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null);
 
         }
 

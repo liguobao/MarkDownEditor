@@ -1,15 +1,11 @@
-using CefSharp;
-using CefSharp.Wpf;
 using GalaSoft.MvvmLight;
 using GalaSoft.MvvmLight.Command;
 using ICSharpCode.AvalonEdit.Document;
 using Imgur.API.Authentication.Impl;
 using Imgur.API.Endpoints.Impl;
 using Imgur.API.Models;
-using MahApps.Metro;
 using MahApps.Metro.Controls.Dialogs;
 using MarkDownEditor.Model;
-using MarkDownEditor.View;
 using Microsoft.Practices.ServiceLocation;
 using Microsoft.Win32;
 using Qiniu.IO;
@@ -17,7 +13,6 @@ using Qiniu.RS;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -25,8 +20,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Markup;
-using System.Windows.Media;
 
 namespace MarkDownEditor.ViewModel
 {
@@ -81,6 +74,7 @@ namespace MarkDownEditor.ViewModel
 
         public string Title => DocumentTitle + (IsModified ? "(*)" : "") + " ---- MarkDownEditor";
 
+        public string DocumentSource => markdownSourceTempPath;
         public string PreviewSource => previewSourceTempPath;
 
         public bool showPreview = true;
@@ -177,6 +171,24 @@ namespace MarkDownEditor.ViewModel
                 if (documentPath == value)
                     return;
                 documentPath = value;
+
+                File.Delete(markdownSourceTempPath);
+                File.Delete(previewSourceTempPath);
+
+                if (string.IsNullOrEmpty(documentPath))
+                {
+                    markdownSourceTempPath = Path.GetTempFileName();
+                    previewSourceTempPath = Path.GetTempFileName() + ".html";
+                }
+                else
+                {
+                    markdownSourceTempPath = Path.GetDirectoryName(documentPath) + "\\~" + Path.GetRandomFileName() + ".md";
+                    previewSourceTempPath = Path.GetDirectoryName(documentPath) + "\\~" + Path.GetRandomFileName() + ".html";
+                }
+
+
+                RaisePropertyChanged("DocumentSource");
+                RaisePropertyChanged("PreviewSource");
                 RaisePropertyChanged("DocumentPath");
             }
         }
@@ -357,14 +369,14 @@ namespace MarkDownEditor.ViewModel
 
         public class ExportFileType
         {
-            public ExportFileType(string sourceCodePath)
+            public ExportFileType(MainViewModel model)
             {
-                SourceCodePath = sourceCodePath;
+                Model = model;
             }
             public string Name { get; set; }            
             public string Filter { get; set; }
             public string ToolTip { get; set; }
-            public string SourceCodePath { get; set; }
+            public MainViewModel Model { get; set; }
 
             public ICommand ExportCommand => new RelayCommand(async () =>
             {
@@ -394,7 +406,7 @@ namespace MarkDownEditor.ViewModel
                             bool isNightMode = ViewModelLocator.Main.SettingsViewModel.IsNightMode;
                             var cssFilePath = Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase, "css", isNightMode ? "Dark" : "Light", ViewModelLocator.Main.CurrentCssFiles[ViewModelLocator.Main.CurrentCssFileIndex]);
                             
-                            DocumentExporter.Export(Name, MarkDownType[context.CurrentMarkdownTypeText], cssFilePath, SourceCodePath, dlg.FileName);
+                            DocumentExporter.Export(Name, MarkDownType[context.CurrentMarkdownTypeText], cssFilePath, Model.DocumentSource, dlg.FileName);
                         });
                         await progress.CloseAsync();
                         var ret = await DialogCoordinator.Instance.ShowMessageAsync(context,
@@ -421,14 +433,14 @@ namespace MarkDownEditor.ViewModel
 
         public List<ExportFileType> ExportFileTypes => new List<ExportFileType>()
         {
-            new ExportFileType(markdownSourceTempPath) {Name="Plain Html", ToolTip=Properties.Resources.TypePlainHtmlToolTip, Filter=Properties.Resources.TypePlainHtmlFilter },
-            new ExportFileType(markdownSourceTempPath) {Name="Html" , ToolTip=Properties.Resources.TypeHtmlToolTip, Filter=Properties.Resources.TypeHtmlFilter },
-            new ExportFileType(markdownSourceTempPath) {Name="RTF" , ToolTip=Properties.Resources.TypeRTFFilter, Filter=Properties.Resources.TypeRTFFilter },
-            new ExportFileType(markdownSourceTempPath) {Name="Docx" , ToolTip=Properties.Resources.TypeDocxToolTip, Filter=Properties.Resources.TypeDocxFilter },
-            new ExportFileType(markdownSourceTempPath) {Name="Epub" , ToolTip=Properties.Resources.TypeEpubToolTip, Filter=Properties.Resources.TypeEpubFilter },
-            new ExportFileType(markdownSourceTempPath) {Name="Latex", ToolTip=Properties.Resources.TypeLatexToolTip, Filter=Properties.Resources.TypeLatexFilter },
-            new ExportFileType(markdownSourceTempPath) {Name="PDF", ToolTip=Properties.Resources.TypePdfToolTip, Filter=Properties.Resources.TypePdfFilter },
-            new ExportFileType(markdownSourceTempPath) {Name="Image", ToolTip=Properties.Resources.TypeImageToolTip, Filter=Properties.Resources.TypeImageFilter }
+            new ExportFileType(this) {Name="Plain Html", ToolTip=Properties.Resources.TypePlainHtmlToolTip, Filter=Properties.Resources.TypePlainHtmlFilter },
+            new ExportFileType(this) {Name="Html" , ToolTip=Properties.Resources.TypeHtmlToolTip, Filter=Properties.Resources.TypeHtmlFilter },
+            new ExportFileType(this) {Name="RTF" , ToolTip=Properties.Resources.TypeRTFFilter, Filter=Properties.Resources.TypeRTFFilter },
+            new ExportFileType(this) {Name="Docx" , ToolTip=Properties.Resources.TypeDocxToolTip, Filter=Properties.Resources.TypeDocxFilter },
+            new ExportFileType(this) {Name="Epub" , ToolTip=Properties.Resources.TypeEpubToolTip, Filter=Properties.Resources.TypeEpubFilter },
+            new ExportFileType(this) {Name="Latex", ToolTip=Properties.Resources.TypeLatexToolTip, Filter=Properties.Resources.TypeLatexFilter },
+            new ExportFileType(this) {Name="PDF", ToolTip=Properties.Resources.TypePdfToolTip, Filter=Properties.Resources.TypePdfFilter },
+            new ExportFileType(this) {Name="Image", ToolTip=Properties.Resources.TypeImageToolTip, Filter=Properties.Resources.TypeImageFilter }
         };
 
         public static Dictionary<string, string> MarkDownType => new Dictionary<string, string>()
@@ -551,12 +563,13 @@ namespace MarkDownEditor.ViewModel
             if (content == null)
                 return;
 
+            DocumentPath = path;
+            DocumentTitle = Path.GetFileName(path);
             SourceCode = new TextDocument(content);
             SourceCode.TextChanged += new EventHandler((object obj, EventArgs e) => UpdatePreview());
             UpdatePreview();
             SourceCode.TextChanged += new EventHandler((object obj, EventArgs e) => IsModified = CanUndo);
-            DocumentPath = path;
-            DocumentTitle = Path.GetFileName(path);
+            
             IsModified = false;
             StatusBarText = $"{Properties.Resources.Document} \"{path}\" {Properties.Resources.OpenedSuccessfully}";
         }
@@ -1077,11 +1090,19 @@ namespace MarkDownEditor.ViewModel
                 return image.Link;
             };
 
+            Func<string, Task<string>> uploadImage2SMMS = async (string filePath) =>
+            {
+                return await Task<string>.Run(() =>
+                {
+                    return SMMSClient.UploadImageToSMMS(filePath);
+                });
+            };
+
             Func<string, Task<string>> uploadImage2Qiniu = async (string filePath) =>
             {
                 return await Task<string>.Run(()=> 
                 {
-                    var settingModel = new SettingsViewModel();
+                    var settingModel = SettingsViewModel;
 
                     Qiniu.Conf.Config.ACCESS_KEY = settingModel.QiniuACCESS_KEY;
                     Qiniu.Conf.Config.SECRET_KEY = settingModel.QiniuSECRET_KEY;
@@ -1103,13 +1124,14 @@ namespace MarkDownEditor.ViewModel
                 });
             };
 
+            string currentImageStorageService = SettingsViewModel.CurrentImageStrorageService;
             var ret = await DialogCoordinator.Instance.ShowMessageAsync(this, Properties.Resources.Image, Properties.Resources.SelectImageType,
                 MessageDialogStyle.AffirmativeAndNegativeAndDoubleAuxiliary, new MetroDialogSettings()
                 {
                     AffirmativeButtonText = Properties.Resources.OnlineImage,
                     NegativeButtonText = Properties.Resources.Cancel,
-                    FirstAuxiliaryButtonText = Properties.Resources.UploadLocalImage2IMGUR,
-                    SecondAuxiliaryButtonText = Properties.Resources.UploadLocalImage2Qiniu,
+                    FirstAuxiliaryButtonText = Properties.Resources.UploadToImageStorageService + currentImageStorageService,
+                    SecondAuxiliaryButtonText = Properties.Resources.InsertLocalImage,
                     ColorScheme = MetroDialogColorScheme.Accented
                 });
 
@@ -1122,7 +1144,7 @@ namespace MarkDownEditor.ViewModel
 
                 insertUrl(link);
             }
-            else
+            else if (ret == MessageDialogResult.FirstAuxiliary)
             //upload
             {
                 OpenFileDialog dlg = new OpenFileDialog();
@@ -1138,8 +1160,13 @@ namespace MarkDownEditor.ViewModel
                         if (info.Length > 5120000)
                             throw new Exception(Properties.Resources.ImageSizeError);
                         progress.SetIndeterminate();
-
-                        string link = ret == MessageDialogResult.FirstAuxiliary ? await uploadImage2Imgur(dlg.FileName) : await uploadImage2Qiniu(dlg.FileName);
+                        string link;
+                        if (currentImageStorageService == "SM.MS")
+                            link = await uploadImage2SMMS(dlg.FileName);
+                        else if (currentImageStorageService == "IMGUR")
+                            link = await uploadImage2Imgur(dlg.FileName);
+                        else
+                            link = await uploadImage2Qiniu(dlg.FileName);
                         await progress.CloseAsync();
                         insertUrl(link);
                     }
@@ -1149,10 +1176,22 @@ namespace MarkDownEditor.ViewModel
                             await progress.CloseAsync();
 
                         await DialogCoordinator.Instance.ShowMessageAsync(this, Properties.Resources.Error, ex.Message,
-                            MessageDialogStyle.Affirmative, new MetroDialogSettings(){ ColorScheme = MetroDialogColorScheme.Accented });
-                    }                    
+                            MessageDialogStyle.Affirmative, new MetroDialogSettings() { ColorScheme = MetroDialogColorScheme.Accented });
+                    }
                 }
-            }            
+            }
+            else if (ret == MessageDialogResult.SecondAuxiliary)
+            {
+                OpenFileDialog dlg = new OpenFileDialog();
+                dlg.Title = Properties.Resources.UploadImagesTitle;
+                dlg.Filter = Properties.Resources.ImageFilter;
+                if (dlg.ShowDialog() == true)
+                {
+                    var uri = new Uri(dlg.FileName);
+
+                    insertUrl(uri.AbsoluteUri);
+                }
+            }      
         });
 
         public ICommand SeparateLineCommand => new RelayCommand(() =>
@@ -1210,12 +1249,12 @@ namespace MarkDownEditor.ViewModel
             {
                 var content = await Open(args[1]);
 
+                DocumentPath = args[1];
+                DocumentTitle = Path.GetFileName(args[1]);
                 SourceCode = new TextDocument(content);
                 SourceCode.TextChanged += new EventHandler((object obj, EventArgs e) => UpdatePreview());
                 UpdatePreview();
                 SourceCode.TextChanged += new EventHandler((object obj, EventArgs e) => IsModified = CanUndo);
-                DocumentPath = args[1];
-                DocumentTitle = Path.GetFileName(args[1]);
                 IsModified = false;
                 StatusBarText = $"{Properties.Resources.Document} \"{args[1]}\" {Properties.Resources.OpenedSuccessfully}";
             }
@@ -1257,22 +1296,16 @@ namespace MarkDownEditor.ViewModel
                 Process.Start(path);
         }
 
+        private PreviewUpdator updator = new PreviewUpdator();
         private void UpdatePreview()
         {
             if (IsShowPreview)
             {
-                StreamWriter sw = new StreamWriter(markdownSourceTempPath);
-                sw.Write(SourceCode.Text);
-                sw.Close();
-
                 bool isNightMode = SettingsViewModel.IsNightMode;
-                var cssFilePath = Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase, "css", isNightMode?"Dark":"Light", CurrentCssFiles[CurrentCssFileIndex]);
-                DocumentExporter.Export("Html Local Mathjax", 
-                    MarkDownType[CurrentMarkdownTypeText], 
-                    CurrentCssFileIndex==0|| CurrentCssFileIndex== CurrentCssFiles.Count-1? null: cssFilePath, 
-                    markdownSourceTempPath, previewSourceTempPath);
+                var cssFilePath = Path.Combine(AppDomain.CurrentDomain.SetupInformation.ApplicationBase, "css", isNightMode ? "Dark" : "Light", CurrentCssFiles[CurrentCssFileIndex]);
+                string cssFile = CurrentCssFileIndex == 0 || CurrentCssFileIndex == CurrentCssFiles.Count - 1 ? null : cssFilePath;
 
-                ShouldReload = !ShouldReload;
+                updator.Update(this, SourceCode.Text, markdownSourceTempPath, previewSourceTempPath, MarkDownType[CurrentMarkdownTypeText], cssFile);
             }            
 
             DocumrntStatisticsInfo = $"{Properties.Resources.Words}: {Regex.Matches(SourceCode.Text, @"[\S]+").Count}       {Properties.Resources.Characters}: {SourceCode.TextLength}       {Properties.Resources.Lines}: {SourceCode.LineCount}";
